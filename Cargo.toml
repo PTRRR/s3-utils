@@ -13,3 +13,4 @@ rusoto_credential = "0.48.0"
 clap = { version = "4.1.8", features = ["derive"] }
 futures-util = "0.3"
 tokio-stream = "0.1"
+walkdir = "2"
