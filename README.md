@@ -27,21 +27,21 @@ This Rust script allows you to transfer files from one Amazon S3 bucket to anoth
 
 | Argument                         | Description                                                   |
 | -------------------------------- | ------------------------------------------------------------- |
-| `--origin_bucket`                | The name of the source bucket.                                |
-| `--target_bucket`                | The name of the target bucket.                                |
-| `--origin_region`                | The AWS region of the source bucket.                          |
-| `--target_region`                | The AWS region of the target bucket.                          |
-| `--origin_aws_access_key_id`     | The AWS access key ID for the source bucket.                  |
-| `--target_aws_access_key_id`     | The AWS access key ID for the target bucket.                  |
-| `--origin_aws_secret_access_key` | The AWS secret access key for the source bucket.              |
-| `--target_aws_secret_access_key` | The AWS secret access key for the target bucket.              |
-| `--origin_endpoint`              | (Optional) Custom endpoint URL for the source bucket.         |
-| `--target_endpoint`              | (Optional) Custom endpoint URL for the target bucket.         |
+| `--origin-bucket`                | The name of the source bucket.                                |
+| `--target-bucket`                | The name of the target bucket.                                |
+| `--origin-region`                | The AWS region of the source bucket.                          |
+| `--target-region`                | The AWS region of the target bucket.                          |
+| `--origin-aws-access-key-id`     | The AWS access key ID for the source bucket.                  |
+| `--target-aws-access-key-id`     | The AWS access key ID for the target bucket.                  |
+| `--origin-aws-secret-access-key` | The AWS secret access key for the source bucket.              |
+| `--target-aws-secret-access-key` | The AWS secret access key for the target bucket.              |
+| `--origin-endpoint`              | (Optional) Custom endpoint URL for the source bucket.         |
+| `--target-endpoint`              | (Optional) Custom endpoint URL for the target bucket.         |
 | `--concurrency`                  | (Optional) Number of concurrent file transfers (default: 50). |
 
 ### Example
 
 ```sh
-cargo run -- b2b --origin_bucket <source_bucket> --target_bucket <target_bucket> --origin_region <source_region> --target_region <target_region> --origin_aws_access_key_id <source_access_key_id> --target_aws_access_key_id <target_access_key_id> --origin_aws_secret_access_key <source_secret_access_key> --target_aws_secret_access_key <target_secret_access_key [--origin_endpoint <source_custom_endpoint>] [--target_endpoint <target_custom_endpoint>] [--concurrency <num_concurrent_transfers>]
+cargo run -- b2b --origin-bucket <source-bucket> --target-bucket <target-bucket> --origin-region <source-region> --target-region <target-region> --origin-aws-access-key-id <source-access-key-id> --target-aws-access-key-id <target-access-key-id> --origin-aws-secret-access-key <source-secret-access-key> --target-aws-secret-access-key <target-secret-access-key [--origin-endpoint <source-custom-endpoint>] [--target-endpoint <target-custom-endpoint>] [--concurrency <num-concurrent-transfers>]
 
 ```
