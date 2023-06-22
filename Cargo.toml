@@ -1,0 +1,15 @@
+[package]
+name = "s3-utils"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "1.28.2", features = ["full"] }
+rusoto_core = "0.48.0"
+rusoto_s3 = "0.48.0"
+rusoto_credential = "0.48.0"
+clap = { version = "4.1.8", features = ["derive"] }
+futures-util = "0.3"
+tokio-stream = "0.1"
