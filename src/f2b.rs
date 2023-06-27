@@ -3,6 +3,7 @@ use futures_util::StreamExt;
 use rusoto_core::Region;
 use rusoto_credential::StaticProvider;
 use rusoto_s3::{PutObjectRequest, S3Client, S3};
+use std::path::PathBuf;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
@@ -14,71 +15,90 @@ pub struct Args {
     pub f2b: Option<String>,
 
     #[arg(long)]
-    pub local_path: String,
+    pub directory: String,
 
     #[arg(long)]
-    pub target_bucket: String,
+    pub bucket: String,
 
     #[arg(long)]
-    pub target_region: String,
+    pub region: String,
 
     #[arg(long)]
-    pub target_aws_access_key_id: String,
+    pub aws_access_key_id: String,
 
     #[arg(long)]
-    pub target_aws_secret_access_key: String,
+    pub aws_secret_access_key: String,
 
     #[arg(long)]
-    pub target_endpoint: Option<String>,
+    pub endpoint: Option<String>,
 
     #[arg(long)]
     pub concurrency: Option<usize>,
+
+    #[arg(long)]
+    pub flatten: Option<bool>,
 }
 
 pub async fn folder_to_bucket() -> Result<(), Box<dyn std::error::Error>> {
     // Read command-line arguments
     let args = Args::parse();
     let concurrency = args.concurrency.unwrap_or(50);
-    let target_bucket = args.target_bucket;
-    let target_endpoint = args
-        .target_endpoint
-        .unwrap_or(format!("s3.{}.amazonaws.com", args.target_region.clone()));
+    let bucket = args.bucket;
+    let endpoint = args
+        .endpoint
+        .unwrap_or(format!("s3.{}.amazonaws.com", args.region.clone()));
+    let directory = args.directory.clone();
 
     // Create AWS credentials provider
-    let target_credentials_provider = StaticProvider::new_minimal(
-        args.target_aws_access_key_id,
-        args.target_aws_secret_access_key,
-    );
+    let credentials_provider =
+        StaticProvider::new_minimal(args.aws_access_key_id, args.aws_secret_access_key);
 
     // Create S3 clients for origin and target regions
-    let target_client = S3Client::new_with(
+    let client = S3Client::new_with(
         rusoto_core::HttpClient::new().expect("Failed to create HTTP client"),
-        target_credentials_provider,
+        credentials_provider,
         Region::Custom {
-            name: args.target_region.clone(),
-            endpoint: target_endpoint,
+            name: args.region.clone(),
+            endpoint,
         },
     );
 
     let (tx, rx) = mpsc::channel(concurrency);
 
-    tokio::spawn(async move {
-        for file in WalkDir::new(args.local_path).into_iter() {
-            let file = file.unwrap();
-            if file.file_type().is_file() {
-                tx.send(file).await.unwrap();
+    tokio::spawn({
+        let directory = directory.clone();
+        async move {
+            for file in WalkDir::new(directory).into_iter() {
+                let file = file.unwrap();
+                if file.file_type().is_file() {
+                    tx.send(file).await.unwrap();
+                }
             }
         }
     });
 
     tokio_stream::wrappers::ReceiverStream::new(rx)
-        .for_each_concurrent(concurrency, |dir_entry| {
-            let target_client = target_client.clone();
-            let target_bucket = target_bucket.clone();
+        .for_each_concurrent(concurrency, |file| {
+            let directory = directory.clone();
+            let client = client.clone();
+            let bucket = bucket.clone();
+            let root_dir = PathBuf::from(directory);
+            let root_dir = root_dir.canonicalize().unwrap();
 
             async move {
-                let file_path = format!("{}", dir_entry.path().display());
-                let object_key = dir_entry.file_name().to_str().unwrap();
+                let file_path = format!("{}", file.path().display());
+                let key = match args.flatten {
+                    Some(true) => file.file_name().to_str().unwrap().to_owned(),
+                    _ => file_path
+                        .replace(root_dir.to_str().unwrap(), "")
+                        .replace("\\", "/"),
+                };
+
+                // Remove first character if it is a slash
+                let key = match key.chars().next() {
+                    Some('/') => key[1..].to_owned(),
+                    _ => key,
+                };
 
                 // Upload the file to the target bucket
                 let mut file = File::open(file_path.clone()).await.unwrap();
@@ -86,20 +106,20 @@ pub async fn folder_to_bucket() -> Result<(), Box<dyn std::error::Error>> {
                 let _ = file.read_to_end(&mut vec).await;
 
                 let put_request = PutObjectRequest {
-                    bucket: target_bucket.to_owned(),
-                    key: object_key.into(),
+                    bucket: bucket.to_owned(),
+                    key: key.clone().into(),
                     body: Some(vec.into()),
                     ..Default::default()
                 };
 
-                match target_client.put_object(put_request).await {
+                match client.put_object(put_request).await {
                     Ok(_) => {}
                     Err(e) => {
                         println!("Error uploading file {}: {:?}", file_path, e);
                     }
                 }
 
-                println!("File sync: {}", file_path);
+                println!("File sync: {}", key);
             }
         })
         .await;
