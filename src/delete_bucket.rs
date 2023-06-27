@@ -2,7 +2,7 @@ use clap::Parser;
 use futures_util::StreamExt;
 use rusoto_core::Region;
 use rusoto_credential::StaticProvider;
-use rusoto_s3::{DeleteObjectRequest, S3Client, S3};
+use rusoto_s3::{DeleteObjectRequest, ListObjectsV2Request, S3Client, S3};
 use tokio::sync::mpsc;
 
 #[derive(Parser, Debug)]
@@ -32,7 +32,7 @@ pub struct Args {
 pub async fn delete_bucket() -> Result<(), Box<dyn std::error::Error>> {
     // Read command-line arguments
     let args = Args::parse();
-    let concurrency = args.concurrency.unwrap_or(50);
+    let concurrency = args.concurrency.unwrap_or(10);
     let bucket = args.bucket;
     let endpoint = args
         .endpoint
@@ -52,91 +52,54 @@ pub async fn delete_bucket() -> Result<(), Box<dyn std::error::Error>> {
         },
     );
 
-    // List objects in the origin bucket
-    let mut list_objects_result = Vec::new();
-
-    let mut objects = client
-        .list_objects_v2(rusoto_s3::ListObjectsV2Request {
-            bucket: bucket.to_string(),
-            ..Default::default()
-        })
-        .await;
-
-    let mut continuation_token: Option<String> = objects.unwrap().continuation_token;
-
-    // println!(
-    //     "Listing objects in bucket {:?}",
-    //     objects.unwrap().next_continuation_token
-    // );
-
-    while continuation_token.is_some() {
-        match objects.unwrap().contents {
-            Some(contents) => {
-                for object in contents {
-                    println!("Deleting {:?}", object.key);
-                    list_objects_result.push(object);
-                }
-            }
-            _ => {}
-        }
-
-        objects = client
-            .list_objects_v2(rusoto_s3::ListObjectsV2Request {
-                bucket: bucket.to_string(),
-                ..Default::default()
-            })
-            .await;
-    }
-
-    // while let Ok(output) = objects {
-    //     match output.contents {
-    //         Some(contents) => {
-    //             for object in contents {
-    //                 println!("Deleting {:?}", object.key);
-    //                 list_objects_result.push(object);
-    //             }
-    //         }
-    //         _ => {}
-    //     }
-
-    //     objects = client
-    //         .list_objects_v2(rusoto_s3::ListObjectsV2Request {
-    //             bucket: bucket.to_string(),
-    //             ..Default::default()
-    //         })
-    //         .await;
-    // }
-
-    println!("Found {} objects", list_objects_result.len());
-
     let (tx, rx) = mpsc::channel(concurrency);
+    tokio::spawn({
+        let client = client.clone();
+        let bucket = bucket.clone();
 
-    tokio::spawn(async move {
-        for object in list_objects_result {
-            tx.send(object.key.unwrap()).await.unwrap();
+        async move {
+            let mut continuation_token = None;
+            loop {
+                let list_objects_request = ListObjectsV2Request {
+                    bucket: bucket.to_owned(),
+                    continuation_token: continuation_token.clone(),
+                    ..Default::default()
+                };
+
+                let list_objects_output =
+                    client.list_objects_v2(list_objects_request).await.unwrap();
+
+                if let Some(contents) = list_objects_output.contents {
+                    for object in contents {
+                        tx.send(object.key.unwrap()).await.unwrap();
+                    }
+                }
+
+                if !list_objects_output.is_truncated.unwrap_or_default() {
+                    break;
+                }
+
+                continuation_token = list_objects_output.next_continuation_token;
+            }
         }
     });
 
     tokio_stream::wrappers::ReceiverStream::new(rx)
-        .for_each_concurrent(concurrency, |object_key| {
-            let object_key = object_key.clone();
+        .for_each_concurrent(concurrency, |key| {
+            let key = key.clone();
             let client = client.clone();
             let bucket = bucket.clone();
 
             async move {
                 let delete_object_request = DeleteObjectRequest {
                     bucket: bucket.to_owned(),
-                    key: object_key.clone(),
+                    key: key.clone(),
                     bypass_governance_retention: Some(true),
                     ..Default::default()
                 };
 
-                let res: Option<rusoto_s3::DeleteObjectOutput> =
-                    client.delete_object(delete_object_request).await.ok();
-
-                println!("Deleted {:?}", res);
-
-                println!("Deleted {}", object_key);
+                client.delete_object(delete_object_request).await.ok();
+                println!("Deleted {}", key);
             }
         })
         .await;
