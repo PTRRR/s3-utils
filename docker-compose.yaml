@@ -1,0 +1,6 @@
+version: "2"
+services:
+  s3-utils:
+    build:
+      context: ./
+      dockerfile: Dockerfile
