@@ -2,12 +2,13 @@ use clap::Parser;
 use futures_util::StreamExt;
 use rusoto_core::Region;
 use rusoto_credential::StaticProvider;
-use rusoto_s3::{PutObjectRequest, S3Client, S3};
+use rusoto_s3::S3Client;
 use std::path::PathBuf;
 use tokio::fs::File;
-use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
 use walkdir::WalkDir;
+
+use crate::utils::{get_file_key, upload_s3_object};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -83,43 +84,31 @@ pub async fn folder_to_bucket() -> Result<(), Box<dyn std::error::Error>> {
             let client = client.clone();
             let bucket = bucket.clone();
             let root_dir = PathBuf::from(directory);
-            let root_dir = root_dir.canonicalize().unwrap();
+            let root_dir = root_dir
+                .canonicalize()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned();
 
             async move {
                 let file_path = format!("{}", file.path().display());
-                let key = match args.flatten {
-                    Some(true) => file.file_name().to_str().unwrap().to_owned(),
-                    _ => file_path
-                        .replace(root_dir.to_str().unwrap(), "")
-                        .replace("\\", "/"),
+                let root_directory = match args.flatten {
+                    Some(true) => None,
+                    _ => Some(root_dir.clone()),
                 };
-
-                // Remove first character if it is a slash
-                let key = match key.chars().next() {
-                    Some('/') => key[1..].to_owned(),
-                    _ => key,
-                };
+                let key = get_file_key(&file, root_directory);
 
                 // Upload the file to the target bucket
-                let mut file = File::open(file_path.clone()).await.unwrap();
-                let mut vec = Vec::new();
-                let _ = file.read_to_end(&mut vec).await;
-
-                let put_request = PutObjectRequest {
-                    bucket: bucket.to_owned(),
-                    key: key.clone().into(),
-                    body: Some(vec.into()),
-                    ..Default::default()
-                };
-
-                match client.put_object(put_request).await {
+                let file = File::open(file_path.clone()).await.unwrap();
+                match upload_s3_object(file, &key, bucket, &client).await {
                     Ok(_) => {}
                     Err(e) => {
                         println!("Error uploading file {}: {:?}", file_path, e);
                     }
                 }
 
-                println!("File sync: {}", key);
+                println!("File uploaded: {}", key);
             }
         })
         .await;

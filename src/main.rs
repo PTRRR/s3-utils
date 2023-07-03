@@ -2,6 +2,7 @@ mod b2b;
 mod cli;
 mod delete_bucket;
 mod f2b;
+mod utils;
 
 use b2b::bucket_to_bucket;
 use delete_bucket::delete_bucket;
