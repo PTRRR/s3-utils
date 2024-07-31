@@ -89,29 +89,49 @@ pub async fn bucket_to_bucket() -> Result<(), Box<dyn std::error::Error>> {
         },
     );
 
-    // List objects in the origin bucket
-    let list_objects_result = origin_client
+    let (tx, rx) = mpsc::channel(concurrency);
+
+    let result = origin_client
         .list_objects_v2(rusoto_s3::ListObjectsV2Request {
             bucket: origin_bucket.to_string(),
             ..Default::default()
         })
         .await;
 
-    let (tx, rx) = mpsc::channel(concurrency);
+    let next_continuation_token = match result {
+        Ok(output) => output.next_continuation_token,
+        Err(_) => None,
+    };
 
-    tokio::spawn(async move {
-        match list_objects_result {
-            Ok(output) => {
-                if let Some(objects) = output.contents {
-                    for object in objects {
-                        tx.send(object.key.unwrap()).await.unwrap();
+    tokio::spawn({
+        let origin_client = origin_client.clone();
+        let origin_bucket = origin_bucket.clone();
+        let mut next_continuation_token = next_continuation_token.clone();
+
+        async move {
+            while next_continuation_token.is_some() {
+                let result = origin_client
+                    .list_objects_v2(rusoto_s3::ListObjectsV2Request {
+                        bucket: origin_bucket.to_string(),
+                        continuation_token: next_continuation_token.clone(),
+                        ..Default::default()
+                    })
+                    .await;
+
+                next_continuation_token = match result {
+                    Ok(output) => {
+                        if let Some(objects) = output.contents {
+                            for object in objects {
+                                tx.send(object.key.unwrap()).await.unwrap();
+                            }
+                        }
+
+                        output.next_continuation_token
                     }
+                    Err(_) => None,
                 }
             }
-            Err(e) => {
-                println!("Error listing objects: {:?}", e);
-            }
-        };
+        }
     });
 
     tokio_stream::wrappers::ReceiverStream::new(rx)
